@@ -10,7 +10,7 @@ static struct bpf_link *links[1];
 
 static const char *TC_GLOBAL = "/sys/fs/bpf/tc/globals";
 static const char *BPF_MASK_TBL_MAP_NAME = "masks_tbl";
-
+static const char *BPF_TUPLES_MAP_NAME = "tuples_map";
 
 
 
@@ -60,7 +60,7 @@ int check_in_masks(struct tuple_key *rule_to_check, struct tuple_value * value_t
     __u32 val1;
     struct tuple_mask zero_key = {0};
    
-    int mask = bpf_map_lookup_elem(get_BPF_prog_by_name(BPF_MASK_TBL_MAP_NAME), &zero_key, &val); //1 =masks_tbl znalezc
+    int mask = bpf_map_lookup_elem(get_BPF_prog_by_name(BPF_MASK_TBL_MAP_NAME), &zero_key, &val); 
     if (mask<0) { 
         printf("no mask 1\n");
         return -1;
@@ -76,10 +76,6 @@ int check_in_masks(struct tuple_key *rule_to_check, struct tuple_value * value_t
 }
 int CreateTuple(struct tuple_key * key_to_add, struct tuple_value *value_to_add){
     const char *map_name = "tuple_2";
-    const char *array_of_maps_name = "tuples_map_2"; //temp, do zmiany oba
-    char *path, *array_path;
-
-    
     struct bpf_create_map_attr attr = {
             .key_size = sizeof(struct tuple_key),
             .value_size = sizeof(struct tuple_value),
@@ -96,44 +92,34 @@ int CreateTuple(struct tuple_key * key_to_add, struct tuple_value *value_to_add)
         return -1;
     }
       
-    bpf_obj_pin(map_fd, "/sys/fs/bpf/tc/globals/tuple_2");
+    bpf_obj_pin(map_fd, "/sys/fs/bpf/tc/globals/tuple_2"); //do usuniecia
    
     printf("New Tuple created with fd = %d\n", map_fd);
-    int update;
-    
-    update = bpf_map_update_elem(map_fd, key_to_add, value_to_add, BPF_ANY); ///ANY do zmiany
-    if(update<0){
+
+    if(bpf_map_update_elem(map_fd, key_to_add, value_to_add, BPF_ANY)<0){
         printf("failed to create Tuple with this id\n");
+        return -1;
     }
     printf("Tuple created\n");
-    
-    
-    struct bpf_create_map_attr attr_array_of_maps = {
-            .map_type = BPF_MAP_TYPE_ARRAY_OF_MAPS,
-            .key_size = sizeof(__u32),
-            .value_size = sizeof(__u32),
-            .max_entries = MAX_TUPLES,
-            .name = array_of_maps_name,
-            .inner_map_fd = MAX_TUPLES-2
-        };
-    int array_of_maps_fd = bpf_create_map_xattr(&attr_array_of_maps);
-    
-    bpf_obj_pin(array_of_maps_fd, "/sys/fs/bpf/tc/globals/tuple_map_2");
-    
+    __u32 outer_key = attr.inner_map_fd;
+    if(bpf_map_update_elem(get_BPF_prog_by_name(BPF_TUPLES_MAP_NAME), &outer_key, &map_fd, 0) <0){
+         printf("failed inserting to tuples map\n");
+    } //0 = flags
+    printf("added to tuples map\n");
+
 
     return map_fd;
 }
 void InsertRule(struct tuple_key *new_rule, struct tuple_value *new_rule_value){
     int val = check_in_masks(new_rule, new_rule_value);
     if(val == -1){
-        //struct tuple_mask_value new_rule_value = {0x99, 0x0,0x0};
         printf("creating new Tuple\n");
         int new_Tuple = CreateTuple(new_rule, new_rule_value);
         
     }
    else{
        printf("rule exist\n");
-     //bpf_debug_printk("rule exist");
+     
    }
 
 
@@ -144,24 +130,19 @@ void DeleteRule(struct tuple_key *new_rule, struct tuple_value *new_rule_value )
         printf("Rule does not exist\n");  
     }
     else {
-        printf("Removing Rule\n"); 
+        printf("Removing Rule\n"); //TODO
     }
 }
 int main (int argc, char **argv){
-    /*char filename[256];
-    struct bpf_program *prog;
-    struct bpf_object *obj;
-    struct bpf_link *link;
-    int i = 0;
-    */
+ 
     struct tuple_key key = {
             .field1 = 0x1,
             .field2 = 0xFF,
-            .field3 = 0x1,
+            .field3 = 0xFC,
     };
    struct tuple_value value = {
             .action = 0x0,
-            .priority = 0x0,
+            .priority = 0x1,
    };
    if (strcmp(argv[1], "add")==0){
        InsertRule(&key, &value);
@@ -169,33 +150,6 @@ int main (int argc, char **argv){
    else if (strcmp(argv[1], "delete")==0){
        DeleteRule(&key, &value);
    }
-  /* snprintf(filename, sizeof(filename), "%s_tss.o", argv[0]);
-   obj = bpf_object__open_file(filename, NULL);
-   if (libbpf_get_error(obj)) {
-		fprintf(stderr, "ERROR: opening BPF object file failed\n");
-		return -1;
-	}
-    if (bpf_object__load(obj)) {
-		fprintf(stderr, "ERROR: loading BPF object file failed\n");
-		goto cleanup;
-	}
-    bpf_object__for_each_program(prog, obj) {
-		progs[i] = prog;
-		links[i] = bpf_program__attach(progs[i]);
-		if (libbpf_get_error(links[i])) {
-			fprintf(stderr, "ERROR: bpf_program__attach failed\n");
-			links[i] = NULL;
-			goto cleanup;
-		}
-		i++;
-	}
-    cleanup:
-        for (i--; i >= 0; i--)
-		bpf_link__destroy(links[i]);
 
-	bpf_object__close(obj);
-	return 0;
-
-*/
  printf("done  \n");
 }
