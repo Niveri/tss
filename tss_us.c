@@ -29,6 +29,7 @@ struct tuple_mask_value {
 
 struct tuple_key {
     __u8 field1; //diffserv
+    __u8 pad;
     __u16 field2; //protocol
     __u32 field3; //source
 };
@@ -67,10 +68,10 @@ int check_in_masks(struct tuple_mask *mask_to_check){
 int countTuplesInMap(int map){
     int counter = 0;
     int res;
-    __u32 key, next_key, value, key1;
+    __u32 key =-1, prev_key =-1, value, key1;
     //przeglada wszystkie 100 kluczy jak sie zadaklaruje maksymalna ilosc? 
     
-    while (bpf_map_get_next_key(map, &key, &next_key)==0){
+    while (bpf_map_get_next_key(map, &prev_key, &key)==0){
         
         res = bpf_map_lookup_elem(map, &key, &value);
         if(res>=0){
@@ -78,44 +79,14 @@ int countTuplesInMap(int map){
             counter ++;
         }
         else{
-           // printf("not found\n");
+            //printf("not found\n");
         }
-        key = next_key;
+        prev_key = key;
 
     }  
     return counter;
 }
-/*
-void AddMaskPointer(struct tuple_mask *mask_to_add){
-    int res;
-    int masks_table = get_BPF_prog_by_name(BPF_MASK_TBL_MAP_NAME);
-    struct tuple_mask key = {-1}, prev_key={-1};
-    struct tuple_mask_value value, new_mask_pointer;
 
-    printf("looking for last key in tuple masks\n");
-
-
-    while(bpf_map_get_next_key(masks_table, &prev_key, &key)==0){
-        printf("next_key_found\n");
-        res =bpf_map_lookup_elem(masks_table, &key, &value);
-        if (res>=0){
-            printf("next_elem_found\n");
-            if (value.has_next == 0){
-                struct tuple_mask next_key;
-                printf("no next value \n" );             
-                new_mask_pointer.next_tuple_mask = *mask_to_add;
-                new_mask_pointer.tuple_id = value.tuple_id;
-                printf("updating tuple id: %d\n", new_mask_pointer.tuple_id);
-                new_mask_pointer.has_next = 1;
-                bpf_map_update_elem(masks_table, &key, &new_mask_pointer ,0); 
-                break;
-            }
-
-        }
-        prev_key = key;
-    }
-    
-}*/
 
 void AddMaskPointer(struct tuple_mask *new_mask, struct tuple_mask_value *new_mask_value){
     printf("add pointer\n");
@@ -149,6 +120,7 @@ void CreateMask(struct tuple_mask *new_mask, int tuple_id){
 int CreateTuple(struct tuple_key * key_to_add, struct tuple_value *value_to_add, struct tuple_mask *mask_to_add){
     char map_name[264];
     int tuples_map = get_BPF_prog_by_name(BPF_TUPLES_MAP_NAME);
+    // tu jak nie znajdzie to create tuples_map + pin
     int number_of_tuples = countTuplesInMap(tuples_map);
     snprintf(map_name, sizeof(map_name), "tuple_%d", number_of_tuples);
     int err;
@@ -159,8 +131,7 @@ int CreateTuple(struct tuple_key * key_to_add, struct tuple_value *value_to_add,
             .max_entries = MAX_TUPLES,
             .map_type = BPF_MAP_TYPE_HASH,
             .name = map_name,
-            .inner_map_fd = 98-number_of_tuples,
-            .map_flags = 0,
+            .inner_map_fd = 99-number_of_tuples,
 
         };
     
@@ -173,7 +144,7 @@ int CreateTuple(struct tuple_key * key_to_add, struct tuple_value *value_to_add,
    // bpf_obj_pin(map_fd, "/sys/fs/bpf/tc/globals/tuple_2"); //pin map
     
     printf("New Tuple created with fd = %d\n", map_fd);
-    //key_to_add & 0xff00ffffffffffff;
+
     printf("size: %d \n", attr.key_size);
     
     if(bpf_map_update_elem(map_fd, key_to_add, value_to_add, BPF_NOEXIST)<0){
@@ -223,6 +194,7 @@ int main (int argc, char **argv){
             .field1 = 0x1,
             .field2 = 0xFF,
             .field3 = 0xFC,
+            .pad = 0,
     };
    struct tuple_value default_value = {
             .action = 0x0,
@@ -253,7 +225,8 @@ int main (int argc, char **argv){
            struct tuple_key key = {
                .field1 = strtol(argv[3], NULL, 16),
                .field2 = strtol(argv[4], NULL, 16),
-               .field3 = strtol(argv[5], NULL, 16)
+               .field3 = strtol(argv[5], NULL, 16),
+               .pad = 0,
            };
            struct tuple_value value = {
                .action = strtoul(argv[7], NULL, 0),
@@ -264,10 +237,10 @@ int main (int argc, char **argv){
                 .mask2[0] = (strtol(argv[11], NULL, 16) >> 8),
                 .mask2[1] = (strtol(argv[11], NULL, 16) >> 0),
                 .pad[0] = 0, //in this tuple_mask format prob to delete
-                .mask3[0] = (strtol(argv[12], NULL, 16) >> 24),
-                .mask3[1] = (strtol(argv[12], NULL, 16)) >> 16,
-                .mask3[2] = (strtol(argv[12], NULL, 16)) >> 8,
-                .mask3[3] = (strtol(argv[12], NULL, 16)) >> 0
+                .mask3[0] = (strtol(argv[12], NULL, 16) >> 0),
+                .mask3[1] = (strtol(argv[12], NULL, 16) >> 8),
+                .mask3[2] = (strtol(argv[12], NULL, 16) >> 16),
+                .mask3[3] = (strtol(argv[12], NULL, 16) >> 24)
            };
            InsertRule(&key, &value, &mask);
    }

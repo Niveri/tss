@@ -81,6 +81,7 @@ struct tuple_mask_value {
 
 struct tuple_key {
     __u8 field1;
+    __u8 pad;
     __u16 field2;
     __u32 field3;
 };
@@ -132,12 +133,10 @@ static __always_inline void * ternary_lookup(struct tuple_key *key, __u32 iterat
     
     struct tuple_mask_value *elem = bpf_map_lookup_elem(&masks_tbl, &zero_key);
     if (!elem) { 
-        bpf_debug_printk("no elem1 %u \n", elem);
         return NULL;
     }
-    bpf_debug_printk("find ");
     struct tuple_mask next_id = elem->next_tuple_mask;
-    bpf_debug_printk("Using mask: %llx \n", ((__u32 *) next_id.mask1));
+    
     
  
     #pragma clang loop unroll(disable)
@@ -148,47 +147,47 @@ static __always_inline void * ternary_lookup(struct tuple_key *key, __u32 iterat
             return NULL;
         }
         struct tuple_key k = {};
-        bpf_debug_printk("Key before clear: %llx %llx %llx", key->field1, key->field2, key->field3);
+        struct tuple_key test_key = {};
         #pragma clang loop unroll(disable)
         for (int i = 0; i < iterations; i++) {
             __u32 *tmp = ((__u32 *) &k);
-            __u32 *mask = (__u32 *) &next_id;
-            bpf_debug_printk("Using mask: %llx", mask);
-            bpf_debug_printk("Masking: %llx", ((__u32 *) key)[i]);
-            *tmp = ((__u32 *) key)[i] & mask[i];
-            tmp++;
+            __u32 *mask = ((__u32 *) &next_id); //take the address of next_id and treat it as it were the address of __u32
+          #pragma clang loop unroll(disable)
+            for (int j = 0; j< sizeof(struct tuple_mask)/4; j++){
+                 
+                 bpf_debug_printk("masking next 4 bytes of: %llx with mask %llx",  *(((__u32 *) key) +j), mask[j]);
+                 tmp[j] = ((__u32 *) key)[j] & mask[j];
+            }
+       
         }
-
-        bpf_debug_printk("Key after clear: %llx %llx %llx", key->field1, key->field2, key->field3);
 
         __u32 tuple_id = elem->tuple_id;
-        __u8 has_next = elem->has_next;
-        __u8 nextvalue[1] = {};
-        nextvalue[1] = elem->next_tuple_mask.mask1;
-        
-        bpf_debug_printk("Looking up tuple %d", tuple_id);
-        bpf_debug_printk(" has_next %d", has_next);
-        bpf_debug_printk(" mask1 %d",nextvalue[1]);
+        bpf_debug_printk("Looking up tuple %d in tuples map", tuple_id);
+
         struct bpf_elf_map *tuple = bpf_map_lookup_elem(&tuples_map, &tuple_id);
         if (!tuple) {
+            bpf_debug_printk(" tuple not found in tuples_map");
             return NULL;
         }
-
-        bpf_debug_printk("Looking up key %llx %llx %llx", k.field3, k.field2, k.field1);
+        bpf_debug_printk(" tuple found in tuples_map");
+        bpf_debug_printk("Looking up key %llx %llx %llx", k.field1, k.field2, k.field3);
         void *data = bpf_map_lookup_elem(tuple, &k);
         if (!data) {
-            __u64 end = bpf_ktime_get_ns();
-            bpf_debug_printk("Classified in %u", end - start);
-            return NULL;
+            bpf_debug_printk("entry not found");
+           
+           
         }
-        bpf_debug_printk("Found entry");
-        struct tuple_value * tuple_entry = (struct tuple_value *) data;
-        if (entry == NULL || tuple_entry->priority > entry->priority) {
-            entry = tuple_entry;
-        }
+        else{
+            bpf_debug_printk("Found entry");
+            struct tuple_value * tuple_entry = (struct tuple_value *) data;
+            if (entry == NULL || tuple_entry->priority > entry->priority) {
+                entry = tuple_entry;
+            }
 
+        }
+        
         if (elem->has_next == 0) {
-            break;
+                break;
         }
         next_id = elem->next_tuple_mask;
     }
@@ -207,21 +206,18 @@ int xdp_ingress(struct xdp_md *ctx)
 SEC("tc-ingress")
 int tc_ingress(struct __sk_buff *skb)
 {   
-    
+    /*
     void *data = (void *)(long)skb->data;
     void *data_end = (void *)(long)skb->data_end;
     struct ethhdr *eth = (struct ethhdr *)(data);
-    //struct iphdr  *ip   = data + sizeof(eth);
+  
     struct iphdr  *ip   = (struct iphdr*) skb->data + sizeof(eth);
-   // ip = (struct iphdr *) skb->data + ETH_LEN;
     if ((void *)(eth + 1) > data_end){
         return TC_ACT_SHOT;
         
     }
-        
-    
-    
-  
+    */  
+   /*
     struct tuple_key key = {
             .field1 = 0x1,
             .field2 = 0xFF,
@@ -237,13 +233,35 @@ int tc_ingress(struct __sk_buff *skb)
     {
         bpf_debug_printk("Entry 1 not found!\n");
     }
+  */
+    struct tuple_key default_key = {
+            .field1 = 0xDE,
+            .pad =0,
+            .field2 = 0xCEAB,
+            .field3 = 0xCCAABB01,
+            
+    };
+    
+
+    /*struct tuple_value * val_default = ternary_lookup(&default_key, 1);
+    if (val_default)
+    {
+        bpf_debug_printk("Entry default found!\n");
+    }
+    else
+    {
+        bpf_debug_printk("Entry default not found!\n");
+    }
+   */
+
+
   
-   
-    /*
+    
     struct tuple_key key1 = {
-            .field1 = 0x1,
-            .field2 = 0xFC,
-            .field3 = 0x1,
+            .field1 = 0x0,
+            .pad = 0,
+            .field2 = 0x11,
+            .field3 = 0xc0a80401,
     };
     struct tuple_value * val2 = ternary_lookup(&key1, 1);
     if (val2)
@@ -254,7 +272,7 @@ int tc_ingress(struct __sk_buff *skb)
     {
         bpf_debug_printk("Entry 2 not found!\n");
     }
-
+    /*
     struct tuple_key key2 = {
             .field1 = 0x1,
             .field2 = 0xCC,
